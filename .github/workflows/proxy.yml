@@ -1,51 +1,42 @@
-name: Generate MTProxy
+name: MTProxy Generator
 
 on:
+  workflow_dispatch:
   schedule:
     - cron: '*/10 * * * *'
-  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install Docker and dependencies
+      - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y docker.io docker-compose curl
-          sudo systemctl start docker
+          sudo apt-get install -y python3 python3-pip git
+          pip3 install cryptography
 
-      - name: Run MTProto Proxy
+      - name: Clone MTProto Proxy
         run: |
           git clone https://github.com/alexbers/mtprotoproxy
           cd mtprotoproxy
-          sudo docker build -t mtprotoproxy .
-          sudo docker run -d --network=host --name=mtproto mtprotoproxy
-          sleep 5
+          echo "PORT = 443" > config.py
+          echo "USERS = {" >> config.py
+          echo "    'tg': '00000000000000000000000000000000'," >> config.py
+          echo "}" >> config.py
+          echo "TLS_DOMAIN = 'cloudflare.com'" >> config.py
 
-      - name: Extract proxy link
+      - name: Run proxy and get link
         run: |
-          SERVER_IP=$(curl -s ifconfig.me)
-          PORT=$(sudo docker exec mtproto python3 -c "import config; print(config.PORT)" 2>/dev/null || echo "443")
-          SECRET=$(sudo docker exec mtproto python3 -c "import config; print(config.TG_SECRET)" 2>/dev/null || echo "00000000000000000000000000000000")
-          echo "tg://proxy?server=$SERVER_IP&port=$PORT&secret=$SECRET" > proxy_link.txt
-          echo "Proxy link generated:"
-          cat proxy_link.txt
+          cd mtprotoproxy
+          python3 mtprotoproxy.py &
+          sleep 3
+          IP=$(curl -s ifconfig.me)
+          SECRET="00000000000000000000000000000000"
+          echo "tg://proxy?server=$IP&port=443&secret=$SECRET" > proxy.txt
+          cat proxy.txt
 
-      - name: Upload proxy link as artifact
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: current-proxy
-          path: proxy_link.txt
-
-      - name: Save to repository (optional)
-        run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-          cp proxy_link.txt proxy_history.txt
-          git add proxy_history.txt
-          git commit -m "Update proxy" || echo "No changes"
-          git push || echo "Push failed"
+          name: proxy-link
+          path: mtprotoproxy/proxy.txt
